@@ -4,6 +4,13 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
+
+#ifndef USERPROG
+/* Project #3 */
+extern bool thread_prior_aging;
+
+#endif
 
 // Add header
 
@@ -111,9 +118,17 @@ struct thread
 	
 	int exec_flag;
 
+	int wakeup_time;                    // save thread wake up time
+
+	int nice;                           // thread nice value
+
+	int recent_cpu;                     // thread recent cpu value
+
 	struct list child_list;             // list for child
 
 	struct list_elem child_list_elem;   // list_elem for parent have child_list
+
+	struct list_elem block_list_elem;   // list_elem for block_list have blocked thread
 
 	struct thread *parent_thread;       // denote parent thread initization at thread_create()
 
@@ -169,4 +184,23 @@ int thread_get_load_avg (void);
 
 struct thread* find_struct_thread(int child_tid); // Add for find struct thread using child_tid
 
+void thread_sleep(int64_t wakeup_time);
+
+void thread_wakeup(int64_t wakeup_time);
+
+bool sort_by_time(const struct list_elem *a, const struct list_elem *b, void *aux);
+
+bool sort_by_priority(const struct list_elem *a, const struct list_elem *b, void *aux);
+
+void running_cpu_plus();
+
+void update_load_avg();
+
+void update_recent_cpu();
+
+void update_priority();
+
+void thread_aging();
+
+int sort_check();
 #endif /* threads/thread.h */

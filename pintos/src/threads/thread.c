@@ -28,6 +28,10 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+/* List of block thread. if thread blocked by thread_sleep, we push back
+   thread block_list_elem at block_list */
+static struct list block_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -36,6 +40,9 @@ static struct thread *initial_thread;
 
 /* Lock used by allocate_tid(). */
 static struct lock tid_lock;
+
+/*load average value variable */
+int load_avg;
 
 /* Stack frame for kernel_thread(). */
 struct kernel_thread_frame 
@@ -53,6 +60,11 @@ static long long user_ticks;    /* # of timer ticks in user programs. */
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
 static unsigned thread_ticks;   /* # of timer ticks since last yield. */
+
+#ifndef USERPROG
+/* Project #3 */
+bool thread_prior_aging;
+#endif
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -92,6 +104,8 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&block_list);   // we init block_list
+  load_avg = 0;
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -101,6 +115,8 @@ thread_init (void)
 
   // Add part initization main_parent_thread;
   initial_thread->parent_thread = NULL;
+  initial_thread->nice = 0;
+  initial_thread->recent_cpu = 0;
 
 }
 
@@ -141,6 +157,15 @@ thread_tick (void)
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
+
+#ifndef USERPROG
+  /* Project #3 */
+  //thread_wakeup();
+
+  if(thread_prior_aging == true)
+	  thread_aging();
+#endif
+
 }
 
 /* Prints thread statistics. */
@@ -194,6 +219,8 @@ thread_create (const char *name, int priority,
      member cannot be observed. */
   list_push_back(&(cur_t->child_list),&(t->child_list_elem));
   t->parent_thread=cur_t;
+  t->nice = cur_t->nice;
+  t->recent_cpu = cur_t->recent_cpu;
 
   old_level = intr_disable ();
 
@@ -219,6 +246,11 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  if(priority > thread_current() -> priority)
+  {
+	  thread_yield();
+  }
+
   return tid;
 }
 
@@ -233,8 +265,9 @@ thread_block (void)
 {
   ASSERT (!intr_context ());
   ASSERT (intr_get_level () == INTR_OFF);
-
+  //printf("11");
   thread_current ()->status = THREAD_BLOCKED;
+  //printf("22");
   schedule ();
 }
 
@@ -353,6 +386,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_yield();//@@
 }
 
 /* Returns the current thread's priority. */
@@ -366,31 +400,60 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
+	thread_current() -> nice = nice;
+	update_recent_cpu();
+	update_priority();
   /* Not yet implemented. */
 }
-
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return thread_current() -> nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
+	int help_num = 1 << 14;
   /* Not yet implemented. */
-  return 0;
+	/*if(load_avg>=0)
+		return (int)(((load_avg) * 100 + (1 << 13)) >> 14);
+	else
+		return (int)(((load_avg * 100) - (1 << 13)) >> 14);*/
+//	return (int)((load_avg * 100) >> 14);
+
+	/* Round part */
+	if(load_avg >= 0)
+	{
+		return (load_avg * 100 + help_num / 2) / help_num;
+	}
+	else
+	{
+		return (load_avg * 100 - help_num / 2) / help_num;
+	}
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
+	int temp_recent_cpu = thread_current() -> recent_cpu;
+	int help_num = 1 << 14;
   /* Not yet implemented. */
-  return 0;
+	/* Round up part */
+	if((thread_current()->recent_cpu*100) % help_num !=0)
+	{
+		return (thread_current()->recent_cpu * 100 + (help_num << 1)) / help_num;
+	}
+  	else
+  	{
+		return (thread_current()->recent_cpu * 100) / help_num;
+	}
+
+	//return (temp_recent_cpu * 100) >> 14;
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
@@ -514,8 +577,10 @@ next_thread_to_run (void)
 {
   if (list_empty (&ready_list))
     return idle_thread;
-  else
+  else{
+	  list_sort(&ready_list,sort_by_priority,NULL);
     return list_entry (list_pop_front (&ready_list), struct thread, elem);
+  }
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -622,4 +687,171 @@ struct thread* find_struct_thread(int child_tid)
 	}
 	if(find_flag == 0)child_t = NULL;
 	return child_t;
+}
+
+void thread_sleep(int64_t wakeup_time)
+{
+	struct thread *t = thread_current();
+	struct list_elem *e;
+
+	enum intr_level old_level = intr_disable();
+
+	t->wakeup_time = wakeup_time;
+
+	list_insert_ordered(&block_list,&t->block_list_elem,sort_by_time,NULL);
+
+	thread_block();
+
+	intr_set_level (old_level);
+}
+void thread_wakeup(int64_t wakeup_time)
+{
+	struct thread *t;
+	struct list_elem *e;
+
+	while(!list_empty(&block_list))
+	{
+
+		e = list_begin(&block_list);
+
+		t = list_entry(e, struct thread, block_list_elem);
+
+		if(t -> wakeup_time <= wakeup_time)
+		{
+			thread_unblock(t);
+			list_pop_front(&block_list);
+		}
+		else
+		{
+			break;
+		}
+	}
+}
+
+bool sort_by_time(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	struct thread *a_t = list_entry(a, struct thread, block_list_elem);
+	struct thread *b_t = list_entry(b, struct thread, block_list_elem);
+	if(a_t->wakeup_time < b_t->wakeup_time)return true;
+	else if(a_t -> wakeup_time == b_t->wakeup_time && a_t -> priority > b_t -> priority)return true;
+	return false;
+}
+
+bool sort_by_priority(const struct list_elem *a, const struct list_elem *b, void *aux)
+{
+	struct thread *a_t = list_entry(a, struct thread, elem);
+	struct thread *b_t = list_entry(b, struct thread, elem);
+
+	if(a_t -> priority > b_t -> priority)return true;
+	return false;
+}
+
+void running_cpu_plus()
+{
+	struct thread* t = thread_current();
+	int temp_recent_cpu = t->recent_cpu;
+	if(t != idle_thread)
+	{
+		t->recent_cpu = temp_recent_cpu + (1<<14);
+	}
+}
+
+void update_load_avg()
+{
+	struct thread* t = thread_current(); 
+	int ready_threads = list_size(&ready_list);
+	int temp_load_avg;
+
+	if(t != idle_thread)ready_threads += 1;
+
+	//load_avg = (int64_t)((59<<14)/60)*load_avg+(1<<14)/60*size;
+
+	temp_load_avg = (((int64_t)load_avg * 59) / 60) + ((ready_threads << 14) / 60);
+
+	load_avg = temp_load_avg;
+
+	//printf("\n%d\n",(load_avg * 100) >> 14);
+	
+}
+void update_recent_cpu()
+{
+	struct thread* t;
+	struct list_elem *e;
+	int temp_recent_cpu;
+	for(e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e))
+	{
+		t=list_entry(e, struct thread, allelem);
+		//t->recent_cpu=((((int64_t)(2*load_avg)<<14)/(2*load_avg+(1<<14))*t->recent_cpu)>>14)+((t->nice)<<14);
+
+		temp_recent_cpu = (((int64_t)(((int64_t)(2 * load_avg) << 14) / (2 * load_avg + (1 << 14))) * t -> recent_cpu) >> 14) + (t -> nice << 14);
+		t -> recent_cpu = temp_recent_cpu;
+	}
+}
+void update_priority()
+{
+	struct thread* t;
+	struct list_elem *e;
+	int flag=0;
+	for(e=list_begin(&all_list);e!=list_end(&all_list);e=list_next(e))
+	{
+		t=list_entry(e, struct thread, allelem);
+		if(t->recent_cpu >= 0 )
+		{
+			t->priority = PRI_MAX - (int)((t->recent_cpu / 4 + (1<<13))>>14);
+		}
+		else
+		{
+			t->priority = PRI_MAX - (int)((t->recent_cpu / 4 - (1<<13))>>14);
+		}
+		t -> priority -= (t -> nice * 2);
+		if(t -> priority >= PRI_MAX)t -> priority = PRI_MAX;
+		if(t -> priority <= PRI_MIN)t -> priority = PRI_MIN;
+	}
+	list_sort(&ready_list,sort_by_priority,NULL);
+
+	flag = sort_check();
+
+	//if(flag == 0)printf("\nboughtabutter\n");
+}
+
+void thread_aging()
+{
+	struct list_elem *e;
+	struct thread *t;
+	int flag=0;
+	for(e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e))
+	{
+		t = list_entry(e, struct thread, elem);
+		if(t -> priority != PRI_MAX)t -> priority += 1;
+	}
+	list_sort(&ready_list, sort_by_priority, NULL);
+
+	flag = sort_check();
+
+	//if(flag == 0)printf("\nGood job\n");
+}
+
+int sort_check()
+{
+	struct list_elem *e;
+	struct thread *t;
+	int flag = 0, pre_prio = 100;
+	for(e = list_begin(&ready_list); e != list_end(&ready_list); e = list_next(e))
+	{
+		t = list_entry(e, struct thread, elem);
+
+		if(pre_prio < t -> priority)
+		{
+			flag = 1;
+			break;
+		}
+
+		pre_prio = t -> priority;
+	}
+
+	if(flag == 0)return true;
+	else
+	{
+		return false;
+	}
 }
