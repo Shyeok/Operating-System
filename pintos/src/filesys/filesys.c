@@ -9,7 +9,7 @@
 
 /* Partition that contains the file system. */
 struct block *fs_device;
-
+//static int a=0;
 static void do_format (void);
 
 /* Initializes the file system module.
@@ -68,7 +68,7 @@ filesys_open (const char *name)
 {
   struct dir *dir = dir_open_root ();
   struct inode *inode = NULL;
-
+	//printf("DEBUG open %d\n",a++);
   if (dir != NULL)
     dir_lookup (dir, name, &inode);
   dir_close (dir);

@@ -194,8 +194,6 @@ thread_create (const char *name, int priority,
      member cannot be observed. */
   list_push_back(&(cur_t->child_list),&(t->child_list_elem));
   t->parent_thread=cur_t;
-  t->flag=false;
-  t->exit_flag=false;
 
   old_level = intr_disable ();
 
@@ -485,8 +483,12 @@ init_thread (struct thread *t, const char *name, int priority)
   // Add intization thread componet
 
   list_init(&(t->child_list));
+  list_init(&(t->fd_list));
   sema_init(&(t->wait_sema), 0);
   sema_init(&(t->exec_sema), 0);
+  sema_init(&(t->get_sema), 0);
+  t->flag = false;
+  t->fd_num = 3;
 }
 
 /* Allocates a SIZE-byte frame at the top of thread T's stack and

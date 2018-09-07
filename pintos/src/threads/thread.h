@@ -8,6 +8,8 @@
 // Add header
 
 #include "synch.h"
+#include "filesys/file.h"
+#include "filesys/filesys.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -105,19 +107,25 @@ struct thread
 
 	int child_exist_status;             // add child_exist_status;
 
+	int flag;
+	
+	int exec_flag;
+
 	struct list child_list;             // list for child
 
 	struct list_elem child_list_elem;   // list_elem for parent have child_list
-
-	bool flag;                          // child visit wait at most once
-
-	bool exit_flag;                     // child exit flag  
 
 	struct thread *parent_thread;       // denote parent thread initization at thread_create()
 
 	struct semaphore wait_sema;         // semaphore for wait
 
 	struct semaphore exec_sema;         // semaphore for exec
+
+	struct semaphore get_sema;
+
+	struct list fd_list;                // list for file descriptor
+
+	unsigned int fd_num;                // file descriptor number
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */

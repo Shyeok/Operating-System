@@ -2,7 +2,7 @@
 #include <debug.h>
 #include "filesys/inode.h"
 #include "threads/malloc.h"
-
+//static int b=0;
 /* An open file. */
 struct file 
   {
@@ -10,7 +10,6 @@ struct file
     off_t pos;                  /* Current position. */
     bool deny_write;            /* Has file_deny_write() been called? */
   };
-
 /* Opens a file for the given INODE, of which it takes ownership,
    and returns the new file.  Returns a null pointer if an
    allocation fails or if INODE is null. */
@@ -45,6 +44,7 @@ file_reopen (struct file *file)
 void
 file_close (struct file *file) 
 {
+	//printf("DBUG close %d\n",b++);
   if (file != NULL)
     {
       file_allow_write (file);
@@ -165,4 +165,11 @@ file_tell (struct file *file)
 {
   ASSERT (file != NULL);
   return file->pos;
+}
+
+/* add for get struct file dney_write*/
+
+int get_deny_write(struct file *file)
+{
+	return file->deny_write;
 }
